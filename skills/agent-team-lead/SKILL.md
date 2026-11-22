@@ -64,7 +64,8 @@ Same rules: worktree, branch, tests first, PR with Definition of Done and test p
 - Check: Definition of Done met, tests real and passing, no files outside the brief's scope, no bloat (least code that solves it), no secrets, no `tmp/` content.
 - Blocking problems: `gh pr review <n> --request-changes` with specific notes, then re-dispatch the same worker on the same branch.
 - Non-blocking items: comment on the PR, then `gh issue create` for each follow-up, add it to the master file as a new task with an owner and model, write a brief for it, and dispatch.
-- Approved: `gh pr review <n> --approve`. Merge only if the mission says you may. Otherwise list ready-to-merge PRs for the user, in dependency order.
+- Passed review: run `gh pr review <n> --approve`. If GitHub refuses because the PR was opened under the same account, leave a PR comment saying it passed review instead.
+- Merge only if the mission says you may merge. In that case your review is the approval: merge PRs that passed it, in dependency order, without waiting for a human. If branch protection blocks the merge, leave the PR as is and report it. Otherwise list ready-to-merge PRs for the user, in dependency order.
 
 ## 9. Keep the tracker current
 Update the master file after every dispatch, PR, review, issue, and merge. Remove worktrees once their branch is merged.
