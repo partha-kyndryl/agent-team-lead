@@ -17,7 +17,7 @@ PRs leave a trail. Every change carries a Definition of Done, the tests that pro
 - Gives each worker its own git worktree and a brief that only covers its task.
 - Runs every worker on the cheapest model that can do the job, never the default. Moves a task up one tier only if its PR fails review twice.
 - Reviews each PR against its Definition of Done, runs the tests, and checks for scope creep and bloat.
-- Does not merge unless you tell it to. It approves and lists PRs in merge order for you. For less critical work, let it merge and go play golf.
+- Does not merge unless you tell it to. By default it reviews and lists PRs in merge order for you. For less critical work, let it merge and go play golf.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ cp -r skills/agent-team-lead ~/.claude/skills/
 /agent-team-lead Refactor the app to match the reference in tmp/new-design. Delete tmp/new-design only after I confirm production.
 ```
 
-Add "you may merge approved PRs" to the mission if you want it to merge.
+Add "you may merge" to the mission if you want it to merge PRs that pass its review, with no human in the loop. Branch protection rules on your repo still apply.
 
 ## License
 
