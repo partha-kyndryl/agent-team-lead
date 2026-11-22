@@ -1,0 +1,14 @@
+{
+  "name": "agent-team-lead",
+  "owner": {
+    "name": "Partha"
+  },
+  "plugins": [
+    {
+      "name": "agent-team-lead",
+      "source": "./",
+      "description": "Claude Code leads a large change: plans parallel tasks, delegates them to Codex, Antigravity and cheaper Claude workers through branches and PRs, reviews every PR, and files follow-up issues.",
+      "version": "1.0.0"
+    }
+  ]
+}
