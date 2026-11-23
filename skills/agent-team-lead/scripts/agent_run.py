@@ -94,6 +94,7 @@ def cmd_run(a):
     os.makedirs(RUNS_DIR, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_path = os.path.join(RUNS_DIR, f"{a.task}-{a.worker}-{stamp}.log")
+    head_before = git_head(a.cwd)
     start = time.time()
     # Worker output goes to the log only. Echoing it would pour the worker's
     # whole JSON stream into the lead's context and burn the lead's tokens.
@@ -103,17 +104,31 @@ def cmd_run(a):
     with open(log_path) as f:
         text = f.read()
     tokens, source = parse_tokens(text)
+    head_after = git_head(a.cwd)
+    commits = None
+    if head_before and head_after:
+        out = subprocess.run(["git", "rev-list", "--count", f"{head_before}..{head_after}"],
+                             cwd=a.cwd, capture_output=True, text=True)
+        commits = int(out.stdout.strip()) if out.returncode == 0 else None
     if code != 0:
         tail = "\n".join(text.splitlines()[-15:])
         print(f"[agent_run] worker failed, last lines of {log_path}:\n{tail}", file=sys.stderr)
     rec = {"task": a.task, "worker": a.worker, "model": a.model, "tag": a.tag,
            "start": start, "end": end, "seconds": round(end - start, 1), "exit": code,
-           "tokens": tokens, "token_source": source, "log": log_path}
+           "tokens": tokens, "token_source": source, "new_commits": commits, "log": log_path}
     with open(LEDGER, "a") as f:
         f.write(json.dumps(rec) + "\n")
     print(f"\n[agent_run] {a.task} {a.worker}/{a.model}: {fmt_time(rec['seconds'])}, "
-          f"{total(tokens):,} tokens ({source or 'not reported'}), exit {code}", file=sys.stderr)
+          f"{total(tokens):,} tokens ({source or 'not reported'}), exit {code}, "
+          f"{'?' if commits is None else commits} new commits", file=sys.stderr)
+    if code == 0 and commits == 0:
+        print(f"[agent_run] WARNING: {a.task} exited 0 but made no commits. Treat it as not done.", file=sys.stderr)
     sys.exit(code)
+
+
+def git_head(cwd):
+    out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 else None
 
 
 def lead_usage(path):
@@ -178,9 +193,14 @@ def cmd_report(a):
     main = [r for r in runs if not r.get("tag")]
     out = ["# Agent runs report", ""]
 
+    def commits_cell(r):
+        c = r.get("new_commits")
+        if c is None:
+            return "?"
+        return f"0 (no work done)" if c == 0 and r["exit"] == 0 else str(c)
     rows = [[r["task"], r["worker"], r["model"], r.get("tag") or "", fmt_time(r["seconds"]),
-             f"{total(r['tokens']):,}" if r["tokens"] else "not reported", r["exit"]] for r in runs]
-    out += ["## Runs", "", table(rows, ["Task", "Worker", "Model", "Tag", "Time", "Tokens", "Exit"]), ""]
+             f"{total(r['tokens']):,}" if r["tokens"] else "not reported", r["exit"], commits_cell(r)] for r in runs]
+    out += ["## Runs", "", table(rows, ["Task", "Worker", "Model", "Tag", "Time", "Tokens", "Exit", "New commits"]), ""]
 
     agg = {}
     for r in main:
