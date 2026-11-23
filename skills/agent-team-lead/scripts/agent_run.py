@@ -2,6 +2,7 @@
 """Run coding-agent workers and measure them: wall time and tokens.
 
   agent_run.py run --task T1 --worker codex --model gpt-5-mini [--tag baseline] [--cwd DIR] -- <command...>
+  agent_run.py start [--mission TEXT]      (once, at the start of a mission)
   agent_run.py report [--lead-session FILE | --no-lead]
 
 Every run appends one line to tmp/agent-runs.jsonl and keeps its full output in
@@ -131,8 +132,17 @@ def git_head(cwd):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def lead_usage(path):
-    """Sum tokens from a Claude Code session log, by model. Dedupes repeated message ids."""
+def parse_ts(value):
+    """Epoch seconds from a Claude Code ISO timestamp like 2026-11-22T23:01:02.123Z."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError):
+        return None
+
+
+def lead_usage(path, since=None):
+    """Sum tokens from a Claude Code session log, by model, from `since` on.
+    Dedupes repeated message ids."""
     by_model, seen = {}, set()
     with open(path) as f:
         for line in f:
@@ -144,6 +154,10 @@ def lead_usage(path):
             u = msg.get("usage")
             if obj.get("type") != "assistant" or not isinstance(u, dict):
                 continue
+            if since is not None:
+                ts = parse_ts(obj.get("timestamp"))
+                if ts is None or ts < since:
+                    continue
             key = (msg.get("id"), obj.get("requestId"))
             if key in seen:
                 continue
@@ -186,77 +200,121 @@ def table(rows, headers):
     return "\n".join([line(headers), "|" + "|".join("-" * (n + 2) for n in w) + "|"] + [line(r) for r in rows])
 
 
+def work(t):
+    """New input + output: the tokens that reflect work. Cached input is the same
+    context re-read every turn, so it is shown but kept out of comparisons."""
+    if not t:
+        return 0
+    return t["fresh_input"] + t["output"] + t.get("total_only", 0)
+
+
+def n(x):
+    return f"{x:,}"
+
+
+def cmd_start(a):
+    os.makedirs("tmp", exist_ok=True)
+    with open(LEDGER, "a") as f:
+        f.write(json.dumps({"event": "mission_start", "time": time.time(), "mission": a.mission}) + "\n")
+    print(f"[agent_run] mission start recorded at {datetime.now():%Y-%m-%d %H:%M}", file=sys.stderr)
+
+
 def cmd_report(a):
     if not os.path.exists(LEDGER):
         sys.exit(f"no runs yet ({LEDGER} missing)")
-    runs = [json.loads(l) for l in open(LEDGER) if l.strip()]
+    records = [json.loads(l) for l in open(LEDGER) if l.strip()]
+    starts = [r["time"] for r in records if r.get("event") == "mission_start"]
+    runs = [r for r in records if not r.get("event")]
     main = [r for r in runs if not r.get("tag")]
-    out = ["# Agent runs report", ""]
+    if not runs:
+        sys.exit("no worker runs recorded yet")
 
+    since, since_note = None, ""
+    if starts:
+        since = starts[-1]
+        main = [r for r in main if r["start"] >= since]
+        runs = [r for r in runs if r["start"] >= since]
+        since_note = f"from mission start, {datetime.fromtimestamp(since):%Y-%m-%d %H:%M}"
+    elif runs:
+        since = min(r["start"] for r in runs)
+        since_note = (f"from the first worker run, {datetime.fromtimestamp(since):%Y-%m-%d %H:%M}. "
+                      "The lead's planning before that isn't counted; run `agent_run.py start` at the "
+                      "beginning of a mission to include it")
+
+    agg = {}
+    for r in main:
+        g = agg.setdefault((r["worker"], r["model"]), {"runs": 0, "sec": 0.0, "tok": empty()})
+        g["runs"] += 1
+        g["sec"] += r["seconds"]
+        for f in ("fresh_input", "cached_input", "output", "total_only"):
+            g["tok"][f] = g["tok"].get(f, 0) + (r["tokens"] or {}).get(f, 0)
+
+    lead_path = None if a.no_lead else (a.lead_session or find_lead_session())
+    lead = lead_usage(lead_path, since) if lead_path and os.path.exists(lead_path) else {}
+
+    busy = sum(r["seconds"] for r in main)
+    wall = union_seconds([(r["start"], r["end"]) for r in main])
+    worker_work = sum(work(g["tok"]) for g in agg.values())
+    lead_work = sum(work(t) for t in lead.values())
+
+    out = ["# Agent runs report", ""]
+    if since_note:
+        out += [f"Counted {since_note}.", ""]
+
+    # Summary
+    rows = []
+    for (w, m), g in sorted(agg.items()):
+        rows.append([f"Worker: {w}", m, g["runs"], fmt_time(g["sec"]), n(g["tok"]["fresh_input"] + g["tok"].get("total_only", 0)),
+                     n(g["tok"]["output"]), n(work(g["tok"])), n(g["tok"]["cached_input"])])
+    for m, t in sorted(lead.items()):
+        rows.append(["Lead", m, "", "not measured", n(t["fresh_input"]), n(t["output"]), n(work(t)), n(t["cached_input"])])
+    out += ["## Summary", "",
+            table(rows, ["Who", "Model", "Runs", "Agent time", "New input", "Output", "Work tokens", "Cached input"]), "",
+            "Work tokens = new input + output. Cached input is the same context re-read on every turn: "
+            "it is counted by the tools and much cheaper, but it isn't work, so it stays out of the share below.", ""]
+    if worker_work and lead_work:
+        out.append(f"- **Share of work tokens done by workers: {worker_work / (worker_work + lead_work):.0%}** "
+                   f"({n(worker_work)} of {n(worker_work + lead_work)})")
+    out += [f"- Worker time, added up: {fmt_time(busy)}",
+            f"- Wall clock while any worker was running: {fmt_time(wall)}",
+            f"- Saved by running workers in parallel: {fmt_time(busy - wall)}" + (f" ({(busy - wall) / busy:.0%})" if busy else "")]
+    missing = [r["task"] for r in main if not r["tokens"]]
+    if missing:
+        out.append(f"- Tokens not reported for: {', '.join(missing)} (their time is still counted)")
+    idle = [r["task"] for r in main if r.get("new_commits") == 0 and r["exit"] == 0]
+    if idle:
+        out.append(f"- Exited 0 but made no commits (no work done): {', '.join(idle)}")
+    out.append("")
+
+    # Per run
     def commits_cell(r):
         c = r.get("new_commits")
         if c is None:
             return "?"
-        return f"0 (no work done)" if c == 0 and r["exit"] == 0 else str(c)
-    rows = [[r["task"], r["worker"], r["model"], r.get("tag") or "", fmt_time(r["seconds"]),
-             f"{total(r['tokens']):,}" if r["tokens"] else "not reported", r["exit"], commits_cell(r)] for r in runs]
-    out += ["## Runs", "", table(rows, ["Task", "Worker", "Model", "Tag", "Time", "Tokens", "Exit", "New commits"]), ""]
-
-    agg = {}
-    for r in main:
-        k = (r["worker"], r["model"])
-        g = agg.setdefault(k, {"runs": 0, "sec": 0.0, "tok": empty()})
-        g["runs"] += 1
-        g["sec"] += r["seconds"]
-        for f in ("fresh_input", "cached_input", "output"):
-            g["tok"][f] += (r["tokens"] or {}).get(f, 0)
-        g["tok"]["total_only"] = g["tok"].get("total_only", 0) + (r["tokens"] or {}).get("total_only", 0)
-    rows = [[w, m, g["runs"], fmt_time(g["sec"]), f"{g['tok']['fresh_input']:,}",
-             f"{g['tok']['cached_input']:,}", f"{g['tok']['output']:,}", f"{total(g['tok']):,}"]
-            for (w, m), g in sorted(agg.items())]
-    out += ["## Workers by model", "", table(rows, ["Worker", "Model", "Runs", "Agent time", "Input", "Cached input", "Output", "Total"]), ""]
-
-    busy = sum(r["seconds"] for r in main)
-    wall = union_seconds([(r["start"], r["end"]) for r in main])
-    worker_tokens = sum(total(r["tokens"]) for r in main)
-    out += ["## Time", "",
-            f"- Agent time, added up: {fmt_time(busy)}",
-            f"- Wall clock while any worker was running: {fmt_time(wall)}",
-            f"- Saved by running in parallel: {fmt_time(busy - wall)}" + (f" ({(busy - wall) / busy:.0%})" if busy else ""),
-            ""]
-
-    lead_path = None if a.no_lead else (a.lead_session or find_lead_session())
-    lead_total = 0
-    if lead_path and os.path.exists(lead_path):
-        lead = lead_usage(lead_path)
-        lead_total = sum(total(t) for t in lead.values())
-        rows = [[m, f"{t['fresh_input']:,}", f"{t['cached_input']:,}", f"{t['output']:,}", f"{total(t):,}"] for m, t in sorted(lead.items())]
-        out += ["## Lead (this Claude Code session)", "", f"Source: `{lead_path}`", "",
-                table(rows, ["Model", "Input", "Cached input", "Output", "Total"]), ""]
-
-    out += ["## Where the tokens went", "",
-            f"- Workers (cheaper models): {worker_tokens:,}",
-            f"- Lead (heavy model): {lead_total:,}" if lead_total else "- Lead: not measured",
-            ]
-    if lead_total and worker_tokens:
-        out.append(f"- Share of all tokens kept off the lead's model: {worker_tokens / (worker_tokens + lead_total):.0%}")
-    missing = [r["task"] for r in main if not r["tokens"]]
-    if missing:
-        out.append(f"- Tokens not reported for: {', '.join(missing)} (time is still counted)")
-    out.append("")
+        return "0 (no work done)" if c == 0 and r["exit"] == 0 else str(c)
+    rows = []
+    for r in runs:
+        t = r["tokens"]
+        rows.append([r["task"], r["worker"], r["model"], r.get("tag") or "", fmt_time(r["seconds"]),
+                     n(t["fresh_input"] + t.get("total_only", 0)) if t else "not reported",
+                     n(t["output"]) if t else "", n(work(t)) if t else "",
+                     n(t["cached_input"]) if t else "", r["exit"], commits_cell(r)])
+    out += ["## Runs", "", table(rows, ["Task", "Worker", "Model", "Tag", "Time", "New input", "Output",
+                                         "Work tokens", "Cached input", "Exit", "New commits"]), ""]
 
     tagged = [r for r in runs if r.get("tag")]
-    if tagged:
-        rows = []
-        for t in tagged:
-            base = next((r for r in main if r["task"] == t["task"]), None)
-            if not base:
-                continue
+    rows = []
+    for t in tagged:
+        base = next((r for r in main if r["task"] == t["task"]), None)
+        if base:
             rows.append([t["task"], f"{base['model']} vs {t['model']} ({t['tag']})",
                          f"{fmt_time(base['seconds'])} vs {fmt_time(t['seconds'])}",
-                         f"{total(base['tokens']):,} vs {total(t['tokens']):,}"])
-        if rows:
-            out += ["## Same task, different model", "", table(rows, ["Task", "Models", "Time", "Tokens"]), ""]
+                         f"{n(work(base['tokens']))} vs {n(work(t['tokens']))}"])
+    if rows:
+        out += ["## Same task, different model", "", table(rows, ["Task", "Models", "Time", "Work tokens"]), ""]
+
+    if lead_path:
+        out += [f"Lead source: `{lead_path}`", ""]
 
     report = "\n".join(out)
     path = os.path.join("tmp", "agent-runs-report.md")
@@ -276,6 +334,8 @@ def main():
     r.add_argument("--tag", default="", help="label a comparison run, e.g. baseline")
     r.add_argument("--cwd", default=None, help="worktree to run in")
     r.add_argument("command", nargs=argparse.REMAINDER)
+    st = sub.add_parser("start", help="record the start of a mission")
+    st.add_argument("--mission", default="")
     rp = sub.add_parser("report")
     rp.add_argument("--lead-session", help="Claude Code session .jsonl (default: latest for this folder)")
     rp.add_argument("--no-lead", action="store_true")
@@ -284,6 +344,8 @@ def main():
         if a.command and a.command[0] == "--":
             a.command = a.command[1:]
         cmd_run(a)
+    elif a.cmd == "start":
+        cmd_start(a)
     else:
         cmd_report(a)
 
