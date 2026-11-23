@@ -59,6 +59,7 @@ Workers never edit the master file. Only you do.
 - Run each worker non-interactively in that worktree, with the chosen model set explicitly, pointing it at its brief: "Read and complete <abs path>/tmp/tasks/<ID>-<worker>.md. Work only on branch feat/<ID>-<slug>. Never commit to or push main. Open a PR when done."
 - Launch every worker through `agent_run.py`, from the main repo root, so its time and tokens are measured. It is at `scripts/agent_run.py` in this skill's folder. If it isn't there, download it once: `curl -fsSL https://raw.githubusercontent.com/partha-kyndryl/agent-team-lead/main/skills/agent-team-lead/scripts/agent_run.py -o tmp/agent_run.py`. Run it as `python3 <path to agent_run.py> run --task <ID> --worker <codex|agy|claude> --model <model> --cwd ../<repo>-<ID> -- <worker command>`. Turn on the worker's JSON output so tokens can be read (`codex exec --json`, `claude -p --output-format json`).
 - Run independent workers in parallel (background shells). Record branch, model and status in the master file.
+- Exit code 0 is not proof of work. If the summary line says a worker made no new commits, treat the task as not done: read its log, fix the cause, or reassign it.
 
 ## 7. Do your own tasks
 Same rules: worktree, branch, tests first, PR with Definition of Done and test paths.
