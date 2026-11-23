@@ -17,6 +17,7 @@ PRs leave a trail. Every change carries a Definition of Done, the tests that pro
 - Gives each worker its own git worktree and a brief that only covers its task.
 - Runs every worker on the cheapest model that can do the job, never the default. Moves a task up one tier only if its PR fails review twice.
 - Reviews each PR against its Definition of Done, runs the tests, and checks for scope creep and bloat.
+- Measures every worker run: time and tokens per task and model, time saved by running in parallel, and how many tokens stayed off the lead's model. One command writes the report.
 - Does not merge unless you tell it to. By default it reviews and lists PRs in merge order for you. For less critical work, let it merge and go play golf.
 
 ## Requirements
@@ -24,6 +25,7 @@ PRs leave a trail. Every change carries a Definition of Done, the tests that pro
 - [Claude Code](https://claude.com/product/claude-code)
 - `git` and the GitHub CLI (`gh`), signed in
 - At least one worker CLI: `codex`, `agy` or `claude`. It uses whichever are installed.
+- Python 3 for the measuring script (standard library only).
 - A `tmp/` folder that is git-ignored. The skill checks and adds it if missing.
 
 ## Install
