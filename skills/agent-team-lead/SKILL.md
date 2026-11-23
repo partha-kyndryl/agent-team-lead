@@ -31,6 +31,17 @@ Tasks must be independent and runnable in parallel:
 - If several tasks need a shared contract (schema, data model, API shape, shared component), make that task 0. You own it and merge it before dispatching the tasks that depend on it.
 - You own the tests for task 0 and for any contract-level behavior. Write them before dispatching. Workers add implementation-level tests only and never weaken or change contract tests.
 
+## 2a. Decide whether a team is worth it
+You need the plan either way, so this check costs almost nothing. Coordination has a real cost (branches, briefs, dispatch, reviews, merges), and it only pays off when the delegated work is bigger than that cost. Count the delegated tasks: everything except task 0 and your own integration work. Use a team only if both hold:
+- at least 3 delegated tasks that own disjoint files, and
+- each one is substantial: expected to change more than about 150 lines or touch 3 or more files.
+
+Otherwise, before doing anything else, tell the user in one line and ask: "This is small enough that I'll be cheaper and faster doing it myself (<N> delegatable tasks, about <X> lines in all). Do it myself? [Y/n]"
+- Y: stop using this skill. Do the task yourself from the plan, on a branch with a PR, with tests first.
+- n: continue with step 3.
+
+These thresholds are starting values. Tune them with the agent_run.py reports from real missions.
+
 ## 3. Assign
 - Keep one or two of the highest-context tasks for yourself: the shared contract, and integration or wiring if needed.
 - Split the rest among codex, agy, and Claude workers, balancing load and playing to strengths. A Claude worker is a headless `claude -p` session on a cheaper Claude model, running in its own worktree.
