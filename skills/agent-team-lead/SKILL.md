@@ -17,6 +17,8 @@ Bias for doing: decide and proceed. Ask the user only for irreversible or produc
 - Never delete reference or source folders the mission says to delete later (for example a reference site in `tmp/`) until the user confirms the change is in production. List that deletion as the final task, owned by the user.
 
 ## 1. Understand
+First, record the mission start so the report counts only this mission: `python3 <path to agent_run.py> start --mission "<short name>"` from the main repo root (see Dispatch for where agent_run.py is).
+
 Read the current codebase, the target or reference material, and any data files the mission names. Note what already exists so no task redoes it.
 
 ## 2. Plan the master file
@@ -76,7 +78,7 @@ Same rules: worktree, branch, tests first, PR with Definition of Done and test p
 ## 9. Keep the tracker current
 Update the master file after every dispatch, PR, review, issue, and merge. Remove worktrees once their branch is merged.
 
-When all PRs are in, run `python3 <path to agent_run.py> report` from the main repo root. It writes `tmp/agent-runs-report.md`: time and tokens per task and per model, how much time parallel runs saved, the lead's own token use from this session, and the share of tokens kept off the lead's model. Link it from the master file. Never estimate a figure the report doesn't have.
+When all PRs are in, run `python3 <path to agent_run.py> report` from the main repo root. It writes `tmp/agent-runs-report.md`: a summary of workers versus the lead in work tokens (new input plus output; cached input is shown but kept out of comparisons), time per task and model, time saved by running in parallel, and any run that did no work. Quote work tokens, not totals that include cached input. Link it from the master file. Never estimate a figure the report doesn't have.
 
 If the user asks how a cheaper model compares with a heavier one, re-run one finished task from its brief in a fresh worktree on the heavier model with `--tag baseline`, then close that branch without a PR. The report shows both runs side by side.
 
