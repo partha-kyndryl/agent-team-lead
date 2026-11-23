@@ -50,6 +50,8 @@ Create `tmp/tasks/<ID>-<worker>.md` for each delegated task. Each brief is a str
 - PR rules: open with `gh pr create`; the PR body includes the Definition of Done and the relative paths of the test files that satisfy it
 - Follow the repo's CLAUDE.md / AGENTS.md
 
+Keep each brief under 75 lines. Point the worker at the contract tests and the files to read instead of restating them; the tests already pin the behavior. Spell out only what the tests and code can't show: traps, edge cases, scope limits.
+
 Workers never edit the master file. Only you do.
 
 ## 6. Dispatch
