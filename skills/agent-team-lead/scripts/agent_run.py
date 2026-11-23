@@ -95,15 +95,17 @@ def cmd_run(a):
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_path = os.path.join(RUNS_DIR, f"{a.task}-{a.worker}-{stamp}.log")
     start = time.time()
+    # Worker output goes to the log only. Echoing it would pour the worker's
+    # whole JSON stream into the lead's context and burn the lead's tokens.
     with open(log_path, "w") as log:
-        proc = subprocess.Popen(a.command, cwd=a.cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            log.write(line)
-            sys.stdout.write(line)
-        code = proc.wait()
+        code = subprocess.call(a.command, cwd=a.cwd, stdout=log, stderr=subprocess.STDOUT)
     end = time.time()
     with open(log_path) as f:
-        tokens, source = parse_tokens(f.read())
+        text = f.read()
+    tokens, source = parse_tokens(text)
+    if code != 0:
+        tail = "\n".join(text.splitlines()[-15:])
+        print(f"[agent_run] worker failed, last lines of {log_path}:\n{tail}", file=sys.stderr)
     rec = {"task": a.task, "worker": a.worker, "model": a.model, "tag": a.tag,
            "start": start, "end": end, "seconds": round(end - start, 1), "exit": code,
            "tokens": tokens, "token_source": source, "log": log_path}
