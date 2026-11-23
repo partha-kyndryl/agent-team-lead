@@ -22,7 +22,7 @@ Read the current codebase, the target or reference material, and any data files 
 ## 2. Plan the master file
 Create `tmp/<mission-slug>_tasks.md`. This is the user's tracking file. It contains:
 - Goal (2-3 lines) and the key architecture decisions
-- A task table: ID, title, owner (lead / codex / agy / claude), model, files or folders owned, depends-on, Definition of Done, test file paths, branch, PR link, status, tokens
+- A task table: ID, title, owner (lead / codex / agy / claude), model, files or folders owned, depends-on, Definition of Done, test file paths, branch, PR link, status
 
 Tasks must be independent and runnable in parallel:
 - Give each task a disjoint set of files or folders it may touch.
@@ -55,6 +55,7 @@ Workers never edit the master file. Only you do.
 ## 6. Dispatch
 - Give each task its own git worktree so workers don't collide: `git worktree add ../<repo>-<ID> -b feat/<ID>-<slug> main`.
 - Run each worker non-interactively in that worktree, with the chosen model set explicitly, pointing it at its brief: "Read and complete <abs path>/tmp/tasks/<ID>-<worker>.md. Work only on branch feat/<ID>-<slug>. Never commit to or push main. Open a PR when done."
+- Launch every worker through `agent_run.py`, from the main repo root, so its time and tokens are measured. It is at `scripts/agent_run.py` in this skill's folder. If it isn't there, download it once: `curl -fsSL https://raw.githubusercontent.com/partha-kyndryl/agent-team-lead/main/skills/agent-team-lead/scripts/agent_run.py -o tmp/agent_run.py`. Run it as `python3 <path to agent_run.py> run --task <ID> --worker <codex|agy|claude> --model <model> --cwd ../<repo>-<ID> -- <worker command>`. Turn on the worker's JSON output so tokens can be read (`codex exec --json`, `claude -p --output-format json`).
 - Run independent workers in parallel (background shells). Record branch, model and status in the master file.
 
 ## 7. Do your own tasks
@@ -72,7 +73,9 @@ Same rules: worktree, branch, tests first, PR with Definition of Done and test p
 ## 9. Keep the tracker current
 Update the master file after every dispatch, PR, review, issue, and merge. Remove worktrees once their branch is merged.
 
-Record the tokens each worker run reports (including re-runs) against its task, and keep a totals row per worker and model. Mark any figure you estimated rather than read from a tool.
+When all PRs are in, run `python3 <path to agent_run.py> report` from the main repo root. It writes `tmp/agent-runs-report.md`: time and tokens per task and per model, how much time parallel runs saved, the lead's own token use from this session, and the share of tokens kept off the lead's model. Link it from the master file. Never estimate a figure the report doesn't have.
+
+If the user asks how a cheaper model compares with a heavier one, re-run one finished task from its brief in a fresh worktree on the heavier model with `--tag baseline`, then close that branch without a PR. The report shows both runs side by side.
 
 ## Reporting
 Tell the user only at milestones: plan written (path to the master file), workers dispatched, PRs ready for merge, blockers that need them. A few lines each, no narration.
