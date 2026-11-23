@@ -120,7 +120,8 @@ def cmd_run(a):
     with open(LEDGER, "a") as f:
         f.write(json.dumps(rec) + "\n")
     print(f"\n[agent_run] {a.task} {a.worker}/{a.model}: {fmt_time(rec['seconds'])}, "
-          f"{total(tokens):,} tokens ({source or 'not reported'}), exit {code}, "
+          + (f"{work(tokens):,} work tokens (new input + output; {tokens['cached_input']:,} cached not counted)"
+             if tokens else "tokens not reported") + f", exit {code}, "
           f"{'?' if commits is None else commits} new commits", file=sys.stderr)
     if code == 0 and commits == 0:
         print(f"[agent_run] WARNING: {a.task} exited 0 but made no commits. Treat it as not done.", file=sys.stderr)
@@ -170,9 +171,15 @@ def lead_usage(path, since=None):
 
 
 def find_lead_session():
+    """The lead's session log: first under this folder's project, else the newest
+    session log on the machine (the lead may be working in a scratch clone).
+    Returns (path, guessed)."""
     enc = re.sub(r"[^A-Za-z0-9]", "-", os.getcwd())
     files = glob.glob(os.path.expanduser(f"~/.claude/projects/{enc}/*.jsonl"))
-    return max(files, key=os.path.getmtime) if files else None
+    if files:
+        return max(files, key=os.path.getmtime), False
+    files = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
+    return (max(files, key=os.path.getmtime), True) if files else (None, False)
 
 
 def fmt_time(s):
@@ -249,7 +256,9 @@ def cmd_report(a):
         for f in ("fresh_input", "cached_input", "output", "total_only"):
             g["tok"][f] = g["tok"].get(f, 0) + (r["tokens"] or {}).get(f, 0)
 
-    lead_path = None if a.no_lead else (a.lead_session or find_lead_session())
+    lead_path, guessed = None, False
+    if not a.no_lead:
+        lead_path, guessed = (a.lead_session, False) if a.lead_session else find_lead_session()
     lead = lead_usage(lead_path, since) if lead_path and os.path.exists(lead_path) else {}
 
     busy = sum(r["seconds"] for r in main)
@@ -314,7 +323,8 @@ def cmd_report(a):
         out += ["## Same task, different model", "", table(rows, ["Task", "Models", "Time", "Work tokens"]), ""]
 
     if lead_path:
-        out += [f"Lead source: `{lead_path}`", ""]
+        out += [f"Lead source: `{lead_path}`" + (" (guessed: the newest session log on this machine; "
+                "pass --lead-session to be sure)" if guessed else ""), ""]
 
     report = "\n".join(out)
     path = os.path.join("tmp", "agent-runs-report.md")
